@@ -1,15 +1,15 @@
 /********************************************************/
 /********************************************************/
-/*  Source file: stats.c
-/*  Type: module
-/*  Application: STEPPE - plant community dynamics simulator
-/*  Purpose: This is where all of the statistics are kept
- *           as the model runs.
-/*  History:
-/*     (6/15/2000) -- INITIAL CODING - cwb
-/*   1/9/01 - revised to make extensive use of malloc() */
-/*	5/28/2013 (DLM) - added module level variable accumulators (grid_Stat) for the grid and functions to deal with them (stat_Load_Accumulators(), stat_Save_Accumulators() stat_Free_Accumulators(), and stat_Init_Accumulators()).  These functions are called from ST_grid.c and manage the output accumulators so that the gridded version can output correctly.  The accumulators are dynamically allocated, so be careful with them.
-/*
+//  Source file: stats.c
+//  Type: module
+//  Application: STEPPE - plant community dynamics simulator
+//  Purpose: This is where all of the statistics are kept
+//           as the model runs.
+//  History:
+//     (6/15/2000) -- INITIAL CODING - cwb
+//   1/9/01 - revised to make extensive use of malloc() */
+//	5/28/2013 (DLM) - added module level variable accumulators (grid_Stat) for the grid and functions to deal with them (stat_Load_Accumulators(), stat_Save_Accumulators() stat_Free_Accumulators(), and stat_Init_Accumulators()).  These functions are called from ST_grid.c and manage the output accumulators so that the gridded version can output correctly.  The accumulators are dynamically allocated, so be careful with them.
+//
 /********************************************************/
 /********************************************************/
 
@@ -44,6 +44,7 @@
   void stat_Output_YrMorts( void ) ;
   void stat_Output_AllMorts( void) ;
   void stat_Output_AllBmass(void) ;
+  void stat_Output_Seed_Dispersal(const char * filename, const char sep, Bool makeHeader); 
   void stat_free_mem( void ) ;
   
   void stat_Load_Accumulators( int cell, int year ); //these accumulators were added to use in the gridded option... there overall purpose is to save/load data to allow steppe to output correctly when running multiple grid cells
@@ -63,11 +64,11 @@ struct stat_st {
   struct accumulators_st *s;
 } _Dist, _Ppt, _Temp,
   *_Grp, *_Gsize, *_Gpr, *_Gmort, *_Gestab,
-  *_Spp, *_Indv, *_Smort, *_Sestab;
+  *_Spp, *_Indv, *_Smort, *_Sestab, *_Sreceived;
 
 typedef struct  {
   struct accumulators_st *dist, *temp, *ppt, **grp1, **gsize, **gpr2, 
-  							**gmort, **gestab, **spp, **indv, **smort, **sestab;
+  							**gmort, **gestab, **spp, **indv, **smort, **sestab, **sreceived;
 } accumulators_grid_st;
   
 accumulators_grid_st *grid_Stat;
@@ -91,7 +92,7 @@ static void _make_header( char *buf);
 }
 
 // quick macro to make life easier in the load/save accumulators functions... it just copies the data of p into v
-// void _copy_over(struct accumulators_st *p, struct accumulators_st *v) 
+// static void _copy_over(struct accumulators_st *p, struct accumulators_st *v) 
 #define _copy_over(p, v) { \
 	(p)->sum = (v)->sum; \
 	(p)->sum_sq = (v)->sum_sq; \
@@ -150,7 +151,7 @@ void stat_Collect( Int year ) {
                           RGroup[rg]->pr);
     }
   }
-
+  
   if (BmassFlags.sppb) {
     ForEachSpecies(sp) {
       bmass = (double) Species_GetBiomass(sp);
@@ -165,6 +166,11 @@ void stat_Collect( Int year ) {
         _collect_add( &_Indv[sp].s[year],
             (double) Species[sp]->est_count);
     }
+  }
+
+  if(UseSeedDispersal && UseGrid) {
+  	ForEachSpecies(sp)
+		_collect_add( &_Sreceived[sp].s[year], (double) Species[sp]->received_prob);
   }
 }
 
@@ -291,6 +297,14 @@ static void _init( void) {
                                 "_stat_init(Smort[sp].s)");
   }
 
+  if (UseSeedDispersal && UseGrid) {
+	  _Sreceived = Mem_Calloc( Globals.sppCount, sizeof(struct stat_st), "_stat_init(Sreceived)");
+	  ForEachSpecies(sp) {
+		  _Sreceived[sp].s = (struct accumulators_st *)Mem_Calloc( Globals.runModelYears, sizeof(struct accumulators_st), "_stat_init(Sreceived[sp].s)");
+		  _Sreceived[sp].name = &Species[sp]->name[0];
+	  }
+  }
+
   /* "appoint" names of columns*/
   if (BmassFlags.grpb) {
     ForEachGroup(rg)
@@ -308,7 +322,6 @@ static void _init( void) {
     ForEachSpecies(sp)
       _Smort[sp].name = &Species[sp]->name[0];
   }
-
 }
 
 /***********************************************************/
@@ -349,6 +362,9 @@ void stat_Init_Accumulators( void ) {
 				grid_Stat[i].sestab[sp] = Mem_Calloc(1, sizeof(struct accumulators_st), "stat_Init_Accumulators()");
 			}
 		}
+
+		if(UseSeedDispersal && UseGrid) 
+			grid_Stat[i].sreceived = Mem_Calloc(Globals.runModelYears, sizeof(struct accumulators_st*), "stat_Init_Accumulators()");
 		  		
   		
   		for( j = 0; j < Globals.runModelYears; j++) {
@@ -361,19 +377,21 @@ void stat_Init_Accumulators( void ) {
   				grid_Stat[i].spp[j] = Mem_Calloc(Globals.sppCount, sizeof(struct accumulators_st), "stat_Init_Accumulators()");
   				if(BmassFlags.indv) grid_Stat[i].indv[j] = Mem_Calloc(Globals.sppCount, sizeof(struct accumulators_st), "stat_Init_Accumulators()");
   			}
+			if(UseSeedDispersal && UseGrid)
+				grid_Stat[i].sreceived[j] = Mem_Calloc(Globals.sppCount, sizeof(struct accumulators_st), "stat_Init_Accumulators()");
   		}
   	}
 }
 
 /***********************************************************/
 void stat_Load_Accumulators(int cell, int year) {
-//loads the accumulators for the cell at the given year
+	//loads the accumulators for the cell at the given year
 
 	if (firsttime) {
-    	firsttime = FALSE;
-    	_init();
-  	}
-  	IntS age;
+		firsttime = FALSE;
+		_init();
+	}
+	IntS age;
 	int yr;
 	yr = year - 1;
 	
@@ -381,12 +399,12 @@ void stat_Load_Accumulators(int cell, int year) {
 		SppIndex sp;
 
 		ForEachSpecies(sp) {
-    		if ( !Species[sp]->use_me) continue;
-    		_copy_over(&_Sestab[sp].s[0], &grid_Stat[cell].sestab[sp][0]);
-    		IntS age;
-   			for (age=0; age < SppMaxAge(sp); age++)
-        		_copy_over(&_Smort[sp].s[age], &grid_Stat[cell].smort[sp][age]);
-  		}
+			if ( !Species[sp]->use_me) continue;
+			_copy_over(&_Sestab[sp].s[0], &grid_Stat[cell].sestab[sp][0]);
+			IntS age;
+			for (age=0; age < SppMaxAge(sp); age++)
+				_copy_over(&_Smort[sp].s[age], &grid_Stat[cell].smort[sp][age]);
+		}
   	}
   	if(MortFlags.group) {
   		GrpIndex rg;
@@ -419,17 +437,23 @@ void stat_Load_Accumulators(int cell, int year) {
   			if (BmassFlags.indv) _copy_over(&_Indv[s].s[yr], &grid_Stat[cell].indv[yr][s]);
   		}
   	}
+
+	if(UseGrid && UseSeedDispersal) {
+		SppIndex s;
+		ForEachSpecies(s)
+			_copy_over(&_Sreceived[s].s[yr], &grid_Stat[cell].sreceived[yr][s]);
+	}
 }
 
 /***********************************************************/
 void stat_Save_Accumulators(int cell, int year) {
-//saves the accumulators for the cell at the given year
+	//saves the accumulators for the cell at the given year
 	
 	if (firsttime) {
-    	firsttime = FALSE;
-    	_init();
-  	}
-  	IntS age;
+		firsttime = FALSE;
+		_init();
+	}
+	IntS age;
   	int yr;
   	yr = year - 1;
   	
@@ -437,22 +461,22 @@ void stat_Save_Accumulators(int cell, int year) {
 		SppIndex sp;
 		
 		ForEachSpecies(sp) {
-    		if ( !Species[sp]->use_me) continue;
-    		_copy_over(&grid_Stat[cell].sestab[sp][0], &_Sestab[sp].s[0]);
-   			for (age=0; age < SppMaxAge(sp); age++)
-        		_copy_over(&grid_Stat[cell].smort[sp][age], &_Smort[sp].s[age]);
-  		}
+			if ( !Species[sp]->use_me) continue;
+			_copy_over(&grid_Stat[cell].sestab[sp][0], &_Sestab[sp].s[0]);
+			for (age=0; age < SppMaxAge(sp); age++)
+				_copy_over(&grid_Stat[cell].smort[sp][age], &_Smort[sp].s[age]);
+		}
   	}
-  	if(MortFlags.group) {
-  		GrpIndex rg;
+	if(MortFlags.group) {
+		GrpIndex rg;
 
-    	ForEachGroup(rg) {
-      		if (!RGroup[rg]->use_me) continue;
-      		_copy_over(&grid_Stat[cell].gestab[rg][0], &_Gestab[rg].s[0]);
-      		for (age=0; age < GrpMaxAge(rg); age++)
-        		_copy_over(&grid_Stat[cell].gmort[rg][age], &_Gmort[rg].s[age]);
-    	}
-  	}
+		ForEachGroup(rg) {
+			if (!RGroup[rg]->use_me) continue;
+			_copy_over(&grid_Stat[cell].gestab[rg][0], &_Gestab[rg].s[0]);
+			for (age=0; age < GrpMaxAge(rg); age++)
+				_copy_over(&grid_Stat[cell].gmort[rg][age], &_Gmort[rg].s[age]);
+		}
+	}
 	
 	if (BmassFlags.tmp) _copy_over(&grid_Stat[cell].temp[yr], &_Temp.s[yr]);
 	if (BmassFlags.ppt) _copy_over(&grid_Stat[cell].ppt[yr], &_Ppt.s[yr]);
@@ -474,6 +498,13 @@ void stat_Save_Accumulators(int cell, int year) {
   			if (BmassFlags.indv) _copy_over(&grid_Stat[cell].indv[yr][s], &_Indv[s].s[yr]);
   		}
   	}
+
+	if(UseGrid && UseSeedDispersal) {
+		SppIndex s;
+		ForEachSpecies(s)
+			_copy_over(&grid_Stat[cell].sreceived[yr][s], &_Sreceived[s].s[yr]);
+	}
+
 }
 
 /***********************************************************/
@@ -492,6 +523,8 @@ void stat_Free_Accumulators( void ) {
   				Mem_Free(grid_Stat[i].spp[j]);
   				if(BmassFlags.indv) Mem_Free(grid_Stat[i].indv[j]);
   			}
+			if(UseSeedDispersal && UseGrid)
+				Mem_Free(grid_Stat[i].sreceived[j]);
   		}
   		
   		if (BmassFlags.dist) Mem_Free(grid_Stat[i].dist);
@@ -525,8 +558,10 @@ void stat_Free_Accumulators( void ) {
   			Mem_Free(grid_Stat[i].smort);
   			Mem_Free(grid_Stat[i].sestab);
   		}
+		if(UseSeedDispersal && UseGrid)
+			Mem_Free(grid_Stat[i].sreceived);
   	}
-  	free(grid_Stat);
+  	Mem_Free(grid_Stat);
   	stat_free_mem();
 }
 
@@ -577,6 +612,14 @@ void stat_free_mem( void ) {
   		Mem_Free(_Smort);
   		Mem_Free(_Sestab);
   	}
+
+
+	if (UseSeedDispersal && UseGrid) {
+		ForEachSpecies(sp)
+			Mem_Free(_Sreceived[sp].s);
+		Mem_Free(_Sreceived);
+	}
+
 	
 }
 
@@ -833,25 +876,60 @@ void stat_Output_AllBmass(void) {
 }
 
 /***********************************************************/
+void stat_Output_Seed_Dispersal(const char * filename, const char sep, Bool makeHeader) {
+	//do stuff...
+	char buf[1024], tbuf[80];
+	IntS yr;
+	SppIndex sp;
+	FILE *f;
+
+	f = OpenFile(filename, "w");
+
+	if(makeHeader) {
+		fprintf(f,"Year");
+		ForEachSpecies(sp) {
+			fprintf(f, "%c%s_prob", sep, Species[sp]->name);
+			fprintf(f, "%c%s_std", sep, Species[sp]->name);
+		}
+		fprintf(f,"\n");
+	}
+
+	for( yr=1; yr<= Globals.runModelYears; yr++) {
+		*buf = '\0';
+		
+		sprintf(buf, "%d%c", yr, sep);
+		
+		ForEachSpecies(sp) {
+			sprintf(tbuf, "%f%c%f%c", _get_avg( &_Sreceived[sp].s[yr-1]), sep, _get_std( &_Sreceived[sp].s[yr-1]), sep);
+			strcat(buf, tbuf);
+		}
+
+		fprintf(f, "%s\n", buf);
+	}	
+	CloseFile(&f);
+}
+
+
+/***********************************************************/
 static RealF _get_avg( struct accumulators_st *p) {
 
-  if (p->nobs == 0) return 0.0;
+	if (p->nobs == 0) return 0.0;
 
-  return (RealF) (p->sum / (double) p->nobs);
+	return (RealF) (p->sum / (double) p->nobs);
 
 }
 
 
 /***********************************************************/
 static RealF _get_std( struct accumulators_st *p) {
-  double s;
+	double s;
 
-  if (p->nobs <= 1) return 0.0;
+	if (p->nobs <= 1) return 0.0;
 
-  s  = (p->nobs * p->sum_sq) - (p->sum * p->sum);
-  s /= p->nobs * (p->nobs -1);
+	s  = (p->nobs * p->sum_sq) - (p->sum * p->sum);
+	s /= p->nobs * (p->nobs -1);
 
-  return (RealF) sqrt(s);
+	return (RealF) sqrt(s);
 
 }
 

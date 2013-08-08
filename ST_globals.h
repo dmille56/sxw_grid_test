@@ -28,4 +28,5 @@ extern ModelType      Globals;
 extern BmassFlagsType BmassFlags;
 extern MortFlagsType  MortFlags;
 
+extern Bool UseSeedDispersal;
 extern Bool UseGrid;

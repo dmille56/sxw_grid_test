@@ -481,9 +481,11 @@ void rgroup_Grow( void) {
     /* for each non-annual species */
     /* grow individuals and increment size */
     /* all groups are either all annual or all perennial */
-    ForEachEstSpp(sp, rg, j) { s = Species[sp];
+    ForEachEstSpp(sp, rg, j) {  s = Species[sp];
 
       sppgrowth = 0.0;
+	if(!Species[sp]->allow_growth)
+		continue;
 
       /* Modify growth rate by temperature
          calculated in Env_Generate() */
@@ -663,6 +665,8 @@ void rgroup_Establish( void) {
 
       ForEachGroupSpp(sp,rg,i) {
         if (! Species[sp]->use_me) continue;
+	if(! Species[sp]->allow_growth)
+		continue;
 
         num_est = Species_NumEstablish(sp);
 
@@ -768,7 +772,7 @@ void RGroup_Update_Newsize( GrpIndex rg) {
 
 #undef xF_DELTA
 #undef xD_DELTA
-#undef ZERO(x)
+#undef ZERO
 }
 
 /***********************************************************/
@@ -1005,14 +1009,15 @@ IndivType **RGroup_GetIndivs( GrpIndex rg, const char sort,IntS *num) {
   IndivType *ndv,
            **nlist;
 
-  nlist = (IndivType **) Mem_Malloc(MAX_INDIVS * i_size,
-                                    "Rgroup_GetIndivs(nlist)");
-  ForEachEstSpp(sp, rg, j) {
-    ForEachIndiv(ndv, Species[sp]) {
-      nlist[i++] = ndv;
-    }
-  }
-  nlist = (IndivType **) Mem_ReAlloc(nlist, i * i_size);
+  ForEachEstSpp(sp, rg, j)
+	  ForEachIndiv(ndv, Species[sp])
+	  	i++;
+  nlist = Mem_Calloc(i, i_size, "Rgroup_GetIndivs(nlist)");
+  
+  i = 0;
+  ForEachEstSpp(sp, rg, j)
+	  ForEachIndiv(ndv, Species[sp])
+	  	nlist[i++] = ndv;
 
   *num = i;
   if (i > 0 && sort)

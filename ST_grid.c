@@ -1,15 +1,15 @@
 /********************************************************/
-/*  Source file: ST_grid.c
-/*  Type: module
-/*  Application: STEPPE - plant community dynamics simulator
-/*  Purpose: This module handles the grid.
-/*  History:
-/*     (5/24/2013) -- INITIAL CODING - DLM
-*/
-/*	WARNING: This module deals with a LARGE amount of dynamic memory allocation/deallocation (there can be potentially hundreds of thousands of allocations/frees called by this code depending on settings ran).  
-/*			 Be very wary when editing it as even small changes could possibly cause massive memory errors/leaks to occur.  In particular be careful when copy/freeing the linked list of individuals (I would suggest just using the code I wrote for this as it works and it's pretty easy to screw it up).  
-/*			 Always keep in mind that for every time memory is allocated (every time alloc or calloc is called), a corresponding free is required.  I would recommend valgrind or a similar program to debug memory errors as doing it without some kind of tool would be crazy.
-/*
+//  Source file: ST_grid.c
+//  Type: module
+//  Application: STEPPE - plant community dynamics simulator
+//  Purpose: This module handles the grid.
+//  History:
+//     (5/24/2013) -- INITIAL CODING - DLM
+//
+//	WARNING: This module deals with a LARGE amount of dynamic memory allocation/deallocation (there can be potentially hundreds of thousands of allocations/frees called by this code depending on settings ran).  
+//			 Be very wary when editing it as even small changes could possibly cause massive memory errors/leaks to occur.  In particular be careful when copy/freeing the linked list of individuals (I would suggest just using the code I wrote for this as it works and it's pretty easy to screw it up).  
+//			 Always keep in mind that for every time memory is allocated (every time alloc or calloc is called), a corresponding free is required.  I would recommend valgrind or a similar program to debug memory errors as doing it without some kind of tool would be crazy.
+/********************************************************/
 /*
 
 ----------------------------------------------------------------------------------------------------------------
@@ -60,7 +60,6 @@ Some things to go over would be correct free/alloc/memcpy usage (keep in mind th
 
 */
 /********************************************************/
-/********************************************************/
 
 /* =================================================== */
 /*                INCLUDES / DEFINES                   */
@@ -80,11 +79,9 @@ Some things to go over would be correct free/alloc/memcpy usage (keep in mind th
 #include "ST_globals.h"
 #include "rands.h"
 
-#ifdef STEPWAT
-  #include "sxw_funcs.h"
-  #include "sxw.h"
-  #include "sxw_vars.h"
-#endif
+#include "sxw_funcs.h"
+#include "sxw.h"
+#include "sxw_vars.h"
 
 #include "SW_Site.h"
 #include "SW_SoilWater.h"
@@ -123,14 +120,13 @@ struct _grid_sxw_st { //holds pointers dynamically allocated by SXW.c
 /************ Module Variable Declarations ***************/
 /***********************************************************/
 
-#define N_GRID_FILES 8
+#define N_GRID_FILES 9
 #define N_GRID_DIRECTORIES 1
 
-char *grid_files[N_GRID_FILES], *grid_directories[N_GRID_DIRECTORIES];
+char *grid_files[N_GRID_FILES], *grid_directories[N_GRID_DIRECTORIES], sd_Sep;
 
-float sd_Rate, sd_Estab_Prob, sd_Biomass_Req, sd_Ps_Const1, sd_Ps_Const2, sd_LYPPT;
 int grid_Cols, grid_Rows, grid_Cells;
-int UseDisturbances, UseSoils, UseSeedDispersal; //these three are treated like booleans
+int UseDisturbances, UseSoils, sd_DoOutput, sd_MakeHeader; //these two are treated like booleans
 
 // these variables are for storing the globals in STEPPE... they are dynamically allocated/freed
 SpeciesType	*grid_Species[MAX_SPECIES];
@@ -160,7 +156,7 @@ SW_MODEL *grid_SW_Model;
 Grid_Soil_St *grid_Soils;
 Grid_Disturb_St *grid_Disturb;
 
-Grid_SD_St *grid_SD; //for seed dispersal
+Grid_SD_St *grid_SD[MAX_SPECIES]; //for seed dispersal
 
 // these are both declared and set in the ST_main.c module
 extern Bool UseSoilwat;
@@ -190,7 +186,7 @@ void mort_EndOfYear( void);
 void parm_Initialize( Int);
 void parm_SetFirstName( char *s);
 void parm_SetName( char *s, int which);
-void parm_free_memory( void ); 
+void parm_free_memory( void );
 
 //from ST_main.c
 void Plot_Initialize( void );
@@ -201,6 +197,7 @@ void stat_Collect_GMort( void );
 void stat_Collect_SMort( void );
 void stat_Output_AllMorts( void) ;
 void stat_Output_AllBmass(void) ;
+void stat_Output_Seed_Dispersal(const char * filename, const char sep, Bool makeHeader); 
 void stat_Load_Accumulators(int cell, int year);
 void stat_Save_Accumulators(int cell, int year);
 void stat_Free_Accumulators( void );
@@ -235,13 +232,13 @@ static void _save_cell( int row, int col, int year );
 static void _read_disturbances_in( void );
 static void _read_soils_in( void );
 static void _init_soil_layers(int cell);
-static float _read_a_float(FILE *f, char *buf, char *filename, char *descriptor);
+static float _read_a_float(FILE *f, char *buf, const char *filename, const char *descriptor);
 static float _cell_dist(int row1, int row2, int col1, int col2, float cellLen);
 static void _read_seed_dispersal_in( void );
 static void _do_seed_dispersal( void );
 static void _set_sd_lyppt(int row, int col);
-static float _get_grid_biomass(int cell);
 static void _kill_groups_and_species( void );
+static int  _do_grid_disturbances(int row, int col);
 
 static IndivType* _create_empty_indv( void ); //these 5 functions are used for copying/freeing the linked list of individuals correctly...
 static void _free_individuals( IndivType *head );
@@ -290,7 +287,7 @@ static int _load_bar(char* prefix, clock_t start, int x, int n, int r, int w)
 	//modified to include an estimate of the time remaining... start must be a clock started (using clock() function) right before beginning the work
 
 	// Only update r times.
-	if ( x % (n/r) != 0 ) return;	
+	if ( x % (n/r) != 0 ) return (int) ((x/(float)n)*100);	
 	
     	int i;    
 
@@ -310,8 +307,8 @@ static int _load_bar(char* prefix, clock_t start, int x, int n, int r, int w)
 		else
 			printf("(est %.2f%c) ", timeLeft, timeChar);
 	}
- 
-    	// Show the percentage complete.
+
+	// Show the percentage complete.
     	printf("%3d%% [", (int)(ratio*100) );
  
     	// Show the load bar.
@@ -322,7 +319,7 @@ static int _load_bar(char* prefix, clock_t start, int x, int n, int r, int w)
        		printf(" ");
  
     	printf("]");
-	fflush(stdout); //we do this to flush (ie. print) the output, since stdout typically waits for a newline or carriage return character before flushing 
+	fflush(stdout); //we do this to flush (ie. print) the output, since stdout typically waits for a newline character before flushing 
 	return result;
 }
 
@@ -334,17 +331,10 @@ void runGrid( void ) {
 	_init_stepwat_inputs();				// reads the stepwat inputs in
 	_init_grid_inputs();				// reads the grid inputs in & initializes the global grid variables
 	
-	//int *dataCollected, *yearAcc;
-	//float *bMassAvgs;
-	//dataCollected = Mem_Calloc(grid_Cells, sizeof(int), "dataCollected");
-	//yearAcc = Mem_Calloc(Globals.runModelIterations, sizeof(int), "yearAcc");
-	//bMassAvgs = Mem_Calloc(Globals.runModelIterations, sizeof(float), "bMassAvgs");
-	
 	double prog_Percent = 0.0, prog_Incr, prog_Acc = 0.0;
-	float biomass = 0.0;
 	char prog_Prefix[32];
 	clock_t prog_Time;
-	int i, j, allowGrowth=0;
+	int i, j;
 	Bool killedany;
 	IntS year, iter;
 	if(UseProgressBar) {
@@ -352,7 +342,7 @@ void runGrid( void ) {
 		prog_Time = clock();  //used for timing
 		sprintf(prog_Prefix, "simulations: ");
 	}
-	
+
 	for(iter = 1; iter <= Globals.runModelIterations; iter++) { //for each iteration
 	
 		if (BmassFlags.yearly || MortFlags.yearly)
@@ -361,61 +351,37 @@ void runGrid( void ) {
 		Plot_Initialize();
 		if(iter > 1) _free_grid_globals(); //frees the memory from when we called _load_grid_globals() last time... (doesn't need to be called on the first iteration because the memory hasn't been allocated yet)
 		
-		_load_grid_globals(); //allocates/initializes grid variables (specifically the ones that are going to change every iter)
 		Globals.currIter = iter;
+		_load_grid_globals(); //allocates/initializes grid variables (specifically the ones that are going to change every iter)
 		
-		//for(i = 0; i < grid_Cells; i++)
-			//dataCollected[i] = 0;
-			
 		for( year=1; year <= Globals.runModelYears; year++) {//for each year
 			for(i = 1; i <= grid_Rows; i++)
 				for(j = 1; j <= grid_Cols; j++) { //for each cell
 					//fprintf(stderr, "year: %d", year);
-				
+
 					_load_cell(i, j, year);
 	          			Globals.currYear = year;
-					if(UseSeedDispersal) {
-						_set_sd_lyppt(i, j);
-						int cell = j + ( (i-1) * grid_Cols) - 1;
-						biomass = _get_grid_biomass(cell);
-						if(UseDisturbances) {
-							if(Globals.currYear == grid_Disturb[cell].kill_yr) {
-								_kill_groups_and_species();
-								biomass = 0;
-							}
-							allowGrowth = (grid_SD[cell].seeds_present || grid_SD[cell].seeds_received || (year < grid_Disturb[cell].kill_yr) || (grid_Disturb[cell].kill_yr <= 0) || GT(biomass, 0.0)) && (year != grid_Disturb[cell].kill_yr);
-							//if(allowGrowth && year >= 1 && grid_Disturb[cell].kill_yr != 0 && !dataCollected[cell]) {
-								//if(GT(biomass, 0.0)) printf("cell %d; yr %d %d %d %d %d %d %d biomass: %f\n", cell, year, grid_SD[cell].seeds_present, grid_SD[cell].seeds_received, year < grid_Disturb[cell].kill_yr, grid_Disturb[cell].kill_yr <= 0, GT(biomass, 0.0), year != grid_Disturb[cell].kill_yr, biomass);
-								//dataCollected[cell] = 0;
-								//if(year - 1 > yearAcc[iter-1])
-									//yearAcc[iter-1] = year - 1;
-							//}
-						} else {
-							allowGrowth = 1;
-						}
-					} else
-						allowGrowth = 1; //if not using seed dispersal, we always allow plant growth.  (if we are using seed dispersal then the cell needs to have seeds or already be growing(ie biomass)...)
+				
+					if(year > 1 && UseSeedDispersal)
+						_set_sd_lyppt(i, j);	
+
+					_do_grid_disturbances(i, j);
 					
-					if(allowGrowth) 
-       		   				rgroup_Establish();  /* excludes annuals */
+					rgroup_Establish();  /* excludes annuals */
 
           				Env_Generate(); //if UseSoilwat it calls : SXW_Run_SOILWAT() which calls : _sxw_sw_run() which calls : SW_CTL_run_current_year()
           				
-          				if(allowGrowth) {
-          					rgroup_PartResources();
-          					rgroup_Grow();
-          				}
+					rgroup_PartResources();
+					rgroup_Grow();
 					
-					if(allowGrowth)
-          					mort_Main( &killedany);
+					mort_Main( &killedany);
 					
-          				if(allowGrowth)
-          					rgroup_IncrAges();
-         			
+					rgroup_IncrAges();
+						
+					
          				stat_Collect(year);
-         				if(allowGrowth)
-         					mort_EndOfYear();
-         		
+					mort_EndOfYear();
+         				
          				_save_cell(i, j, year);
          		
          				if(UseProgressBar) {
@@ -427,24 +393,11 @@ void runGrid( void ) {
          			}
     			} /* end model run for this cell*/
     			
-    		if(UseSeedDispersal)
-    			_do_seed_dispersal();
-    	}/* end model run for this year*/	
+			if(UseSeedDispersal)
+				_do_seed_dispersal();
+		}/* end model run for this year*/	
     	
-    	//if(UseDisturbances) {
-    	//	float avgBiomass=0, disturbBiomass=0;
-    	//	for(i = j = 0; i < grid_Cells; i++)
-    	//		if(grid_Disturb[i].kill_yr <= 0) {
-    	//			avgBiomass += _get_grid_biomass(i);
-    	//			j++;
-    	//		} else
-    	//			disturbBiomass += _get_grid_biomass(i);
-    	//	avgBiomass /= (float)j;
-    	//	disturbBiomass /= (float)(i-j);
-    	//	bMassAvgs[iter-1] = disturbBiomass/avgBiomass;
-    	//}
-    	
-    	// collects the data appropriately for the mort output... (ie. fills the accumulators in ST_stats.c with the values that they need)
+		// collects the data appropriately for the mort output... (ie. fills the accumulators in ST_stats.c with the values that they need)
 		if(MortFlags.summary)
 			for( i = 1; i <= grid_Rows; i++)
 				for( j = 1; j <= grid_Cols; j++) {
@@ -457,13 +410,6 @@ void runGrid( void ) {
 	} /*end iterations */
     	if(UseProgressBar) printf("\rsimulations took approximately: %.2f seconds\n", ((double)(clock() - prog_Time) / CLOCKS_PER_SEC));
     
-    	//float yearAccTotal=0, bMassAccTotal=0;
-    	//for(i = 0; i < Globals.runModelIterations; i++) {
-    	//	yearAccTotal += yearAcc[i];
-    	//	bMassAccTotal += bMassAvgs[i];
-    	//}
-    	//printf("avg dispersal time: %.2f yrs; avg rel disturb bmass: %.2f%%\n", yearAccTotal/(float)Globals.runModelIterations, 100.0 * (bMassAccTotal/(float)Globals.runModelIterations));
-
 	if(UseProgressBar) {
  		prog_Percent = prog_Acc = 0.0;
  		prog_Incr = ((double)1)/ ((double)grid_Cells);
@@ -480,18 +426,21 @@ void runGrid( void ) {
   			for( year=2; year <= Globals.runModelYears; year++) // _load_cell gets the first years accumulators loaded, so we start at 2...
   				stat_Load_Accumulators(cell, year);
   				
-  			char fileMort[1024], fileBMass[1024];
+  			char fileMort[1024], fileBMass[1024], fileReceivedProb[1024];
   		
+			sprintf(fileReceivedProb, "%s%d.out", grid_files[8], cell);
   			sprintf(fileMort, "%s%d.out", grid_files[7], cell);
   			sprintf(fileBMass, "%s%d.out", grid_files[6], cell);
   			parm_SetName(fileMort, F_MortAvg);
   			parm_SetName(fileBMass, F_BMassAvg);
   		
   			if (MortFlags.summary)
-    			stat_Output_AllMorts();
+    				stat_Output_AllMorts();
   			if (BmassFlags.summary)
-    			stat_Output_AllBmass();
-    		
+    				stat_Output_AllBmass();
+			if (UseSeedDispersal && sd_DoOutput)
+				stat_Output_Seed_Dispersal(fileReceivedProb, sd_Sep, sd_MakeHeader); 
+
         		if(UseProgressBar) {
         			prog_Percent += prog_Incr;
         			if(prog_Percent > prog_Acc) {
@@ -503,9 +452,6 @@ void runGrid( void ) {
     	}
 	if(UseProgressBar) printf("\routputting files took approximately %.2f seconds\n", ((double)(clock() - prog_Time) / CLOCKS_PER_SEC));
 	_free_grid_memory(); // free our allocated memory since we do not need it anymore
-	//Mem_Free(yearAcc);
-	//Mem_Free(dataCollected);
-	//Mem_Free(bMassAvgs);
 	/*if(UseProgressBar)*/ printf("!\n");
 }
 
@@ -536,8 +482,8 @@ static void _init_grid_files( void ) {
     		logfp = stdout;
   	 else
     		logfp = OpenFile(grid_files[0], "w"); //grid_files[0] is the logfile to use
-    
-    	/*printf("stepwat dir: %s\n", grid_directories[0]);
+    	
+	 /*printf("stepwat dir: %s\n", grid_directories[0]);
     	for(i = 0; i < N_GRID_FILES; i++)
     		printf("%d : %s\n", i, grid_files[i]);*/
     
@@ -550,7 +496,7 @@ static void _init_grid_inputs( void ) {
 	
 	FILE *f;
 	char buf[1024];
-	int i;
+	int i, j;
 
 	f = OpenFile(grid_files[1], "r"); //grid_files[1] is the grid inputs file
 	
@@ -577,10 +523,11 @@ static void _init_grid_inputs( void ) {
 		LogError(logfp, LOGFATAL, "Invalid grid setup file (soils line wrong)");
 		
 	GetALine(f, buf);
-	i=sscanf( buf, "%d", &UseSeedDispersal );
+	i=sscanf( buf, "%d", &j );
 	if(i != 1)
 		LogError(logfp, LOGFATAL, "Invalid grid setup file (seed dispersal line wrong)");
-	
+	UseSeedDispersal = itob(j);	
+
 	CloseFile(&f);
 	
 	_init_grid_globals(); // initializes the global grid variables
@@ -608,13 +555,13 @@ static void _init_stepwat_inputs( void ) {
 	// reads in the stepwat inputs
 	ChDir(grid_directories[0]);			// changes to the folder that the stepwat input is in
 	
-	parm_SetFirstName(grid_files[5]);	// correctly sets the name of the stepwat files.in file
+	parm_SetFirstName(grid_files[5]);		// correctly sets the name of the stepwat files.in file
 	parm_Initialize( 0);				// loads stepwat input files
 	
 	if(UseSoilwat)
 		_init_SXW_inputs(TRUE);
 	
-	ChDir("..");						// goes back to the folder that we were in
+	ChDir("..");					// goes back to the folder that we were in
 }
 
 /***********************************************************/
@@ -661,6 +608,31 @@ static IndivType* _copy_head( IndivType *head ) {
 	return _copy_individuals(head);
 }
 
+/**********************************************************/
+static void _copy_species(SpeciesType* to, SpeciesType* from, Bool deep) {
+	if(deep) {
+		Mem_Free(to->kills);
+		Mem_Free(to->seedprod);
+		_free_head(to->IndvHead); //free_head() frees the memory allocated by the head and the memory allocated by each part of the linked list
+	}
+
+	//*to = *from;
+	to->est_count = from->est_count;
+	to->estabs = from->estabs;
+	to->relsize = from->relsize;
+	to->extragrowth = from->extragrowth;
+	to->allow_growth = from->allow_growth;
+
+	if(deep) {
+		to->kills = Mem_Calloc(from->max_age, sizeof(IntUS), "_load_cell(Species[s]->kills)");
+		to->seedprod = Mem_Calloc(from->viable_yrs, sizeof(RealF), "_load_cell(Species[s]->seedprod)");
+
+		memcpy(to->kills, from->kills, from->max_age * sizeof(IntUS));
+		memcpy(to->seedprod, from->seedprod, from->viable_yrs * sizeof(RealF));
+		to->IndvHead = _copy_head(from->IndvHead); //copy_head() deep copies the linked list structure (allocating memory when needed)... it will even allocate memory for the head of the list
+	}
+}
+
 /***********************************************************/
 static void _init_grid_globals( void ) {
 	//initializes grid variables, allocating the memory necessary for them (this step is only needed to be done once)
@@ -695,7 +667,8 @@ static void _init_grid_globals( void ) {
 	if(UseDisturbances)
 		grid_Disturb = Mem_Calloc(grid_Cells, sizeof(Grid_Disturb_St), "_init_grid_globals()");
 	if(UseSeedDispersal)
-		grid_SD = Mem_Calloc(grid_Cells, sizeof(Grid_SD_St), "_init_grid_globals()");
+		ForEachSpecies(s)
+			if(Species[s]->use_me && Species[s]->use_dispersal) grid_SD[s] = Mem_Calloc(grid_Cells, sizeof(Grid_SD_St), "_init_grid_globals()");
 	
 	stat_Init_Accumulators();
 }
@@ -714,6 +687,7 @@ static void _load_grid_globals( void ) {
 		ForEachSpecies(s) { //macros defined in ST_defines.h
 			if(!Species[s]->use_me) continue;
 			grid_Species[s][i] = *Species[s];
+
 			grid_Species[s][i].kills = Mem_Calloc(Species[s]->max_age, sizeof(IntUS), "_init_grid_globals()");
 			grid_Species[s][i].seedprod = Mem_Calloc(Species[s]->viable_yrs, sizeof(RealF), "_init_grid_globals()");
 			
@@ -845,14 +819,16 @@ static void _free_grid_memory( void ) {
 	}
 	if(UseDisturbances)
 		Mem_Free(grid_Disturb);
-	if(UseSeedDispersal) {
-		for(i = 0; i < grid_Cells; i++) {
-			Mem_Free(grid_SD[i].cells);
-			Mem_Free(grid_SD[i].prob);
-			grid_SD[i].size = 0;
-		}
-		Mem_Free(grid_SD);
-	}
+	if(UseSeedDispersal)
+		ForEachSpecies(s) 
+			if(Species[s]->use_me && Species[s]->use_dispersal) { 
+				for(i = 0; i < grid_Cells; i++) {
+					Mem_Free(grid_SD[s][i].cells);
+					Mem_Free(grid_SD[s][i].prob);
+					grid_SD[s][i].size = 0;
+				}
+				Mem_Free(grid_SD[s]);
+			}
 	
 	stat_Free_Accumulators(); //free our memory we allocated for all the accumulators now that they're unnecessary to have
 	
@@ -898,12 +874,13 @@ static void _load_cell( int row, int col, int year ) {
 	stat_Load_Accumulators(cell, year);
 	ForEachSpecies(s) {
 		if(!Species[s]->use_me) continue;
+
 		Mem_Free(Species[s]->kills);
 		Mem_Free(Species[s]->seedprod);
 		_free_head(Species[s]->IndvHead); //free_head() frees the memory allocated by the head and the memory allocated by each part of the linked list
 		
 		*Species[s] = grid_Species[s][cell];
-		
+
 		Species[s]->kills = Mem_Calloc(grid_Species[s][cell].max_age, sizeof(IntUS), "_load_cell(Species[s]->kills)");
 		Species[s]->seedprod = Mem_Calloc(grid_Species[s][cell].viable_yrs, sizeof(RealF), "_load_cell(Species[s]->seedprod)");
 		
@@ -969,6 +946,7 @@ static void _save_cell( int row, int col, int year ) {
 	stat_Save_Accumulators(cell, year);
 	ForEachSpecies(s) {
 		if(!Species[s]->use_me) continue;
+
 		Mem_Free(grid_Species[s][cell].kills);
 		Mem_Free(grid_Species[s][cell].seedprod);
 		_free_head(grid_Species[s][cell].IndvHead);
@@ -1167,7 +1145,7 @@ static void _init_soil_layers(int cell) {
 	i = cell;
 	
 	Bool evap_ok = TRUE, transp_ok_tree = TRUE, transp_ok_shrub = TRUE, transp_ok_grass = TRUE; /* mitigate gaps in layers */
-
+	
 	for(j = 0; j < SW_Site.n_layers; j++)
 		Mem_Free(SW_Site.lyr[j]);
 	Mem_Free(SW_Site.lyr);
@@ -1241,11 +1219,11 @@ static void _init_soil_layers(int cell) {
 }
 
 /***********************************************************/
-static float _read_a_float(FILE *f, char *buf, char *filename, char *descriptor) {
+static float _read_a_float(FILE *f, char *buf, const char *filename, const char *descriptor) {
 	//small function to reduce code duplication in the _read_seed_dispersal_in() function...
 	//f should be already open, and all of the character arrays should be pre-allocated before calling the function...
 	float result;
-	
+
 	if(!GetALine(f, buf))
 		LogError(logfp, LOGFATAL, "Invalid %s file: %s", filename, descriptor);
 	if(sscanf(buf, "%f", &result) != 1) 
@@ -1274,136 +1252,200 @@ static void _read_seed_dispersal_in( void ) {
 
 	FILE *f;
 	char buf[1024];
-	float H, VW, VT, MAXD, plotLength, d, pd;
+	float sd_Rate, H, VW, VT, MAXD, plotLength, d, pd;
 	int maxCells, i, j, k, MAXDP, row, col, cell;
+	SppIndex s;
 	
     	// read in the seed dispersal input file to get the constants that we need
     	f = OpenFile(grid_files[4], "r");
     
-    	sd_Estab_Prob = _read_a_float(f, buf, grid_files[4], "establishment probability line");
-    	sd_Biomass_Req = _read_a_float(f, buf, grid_files[4], "biomass required line");
-    	sd_Ps_Const1 = _read_a_float(f, buf, grid_files[4], "ps C1 line");
-    	sd_Ps_Const2 = _read_a_float(f, buf, grid_files[4], "ps C2 line");
-    	H = _read_a_float(f, buf, grid_files[4], "H line");
     	VW = _read_a_float(f, buf, grid_files[4], "VW line");
-    	VT = _read_a_float(f, buf, grid_files[4], "VT line");
-    
+	
+	GetALine(f, buf);
+	if(sscanf(buf, "%d", &sd_DoOutput) != 1)
+		LogError(logfp, LOGFATAL, "Invalid %s file: seed dispersal output line\n", grid_files[4]);
+	   
+	GetALine(f, buf);
+	if(sscanf(buf, "%d", &sd_MakeHeader) != 1)
+		LogError(logfp, LOGFATAL, "Invalid %s file: seed dispersal make header line\n", grid_files[4]);
+
+	GetALine(f, buf);
+	if(sscanf(buf, "%c", &sd_Sep) != 1)
+		LogError(logfp, LOGFATAL, "Invalid %s file: seed dispersal seperator line\n", grid_files[4]);
+
+	if(sd_Sep == 't') //dealing with tab and space special cases...
+		sd_Sep = '\t';
+	else if(sd_Sep == 's')
+		sd_Sep = ' ';
+
     	CloseFile(&f);
+	
+	ForEachSpecies(s) {
+		// set up grid_SD with the seed dispersal probabilities needed later on...
+		H = Species[s]->sd_H;
+		VT = Species[s]->sd_VT;
+		MAXD = ((H * VW) / VT) / 100.0; // divide by 100.0 because we want it in meters, not centimeters
+		sd_Rate = -(log(0.005)/MAXD); //sd_Rate is the seed dispersal rate... 0.005 = exp(-RATE*MAXD) => RATE = -(ln(0.005)/MAXD)
 		
-	// set up grid_SD with the seed dispersal probabilities needed later on...
-	MAXD = ((H * VW) / VT) / 100.0; // divide by 100.0 because we want it in meters, not centimeters
-	//MAXD = sqrt(Globals.plotsize) * 4.0;
-	sd_Rate = -(log(0.005)/MAXD); //sd_Rate is the seed dispersal rate... 0.005 = exp(-RATE*MAXD) => RATE = -(ln(0.005)/MAXD)
-	
-	plotLength = sqrt(Globals.plotsize);
-	MAXDP = (int) ceil(MAXD / plotLength); //MAXD in terms of plots... rounds up to the nearest integer
-	maxCells = (int) pow((MAXDP*2) + 1.0, 2.0); //gets the maximum number of cells that a grid cell can possibly disperse seeds to... it ends up being more then the maximum actually...
-	if(grid_Cells < maxCells)
-		maxCells = grid_Cells;
-	
-	for(i = 0; i < grid_Cells; i++) {
-		grid_SD[i].cells = Mem_Calloc(maxCells, sizeof(int), "_read_seed_dispersal_in()"); //refers to the cell number
-		grid_SD[i].prob = Mem_Calloc(maxCells, sizeof(float), "_read_seed_dispersal_in()"); //refers to the probability that the cell will disperse seeds to this distance
-		grid_SD[i].size = 0; //refers to the number of cells reachable...
-	}
-	
-	for(row = 1; row <= grid_Rows; row++)
-		for(col = 1; col <= grid_Cols; col++) {
-			
-			cell = col + ( (row-1) * grid_Cols) - 1;
-			k = 0;
-			
-			for(i = 1; i <= grid_Rows; i++)
-				for(j = 1; j <= grid_Cols; j++) {
-					if(i == row && j == col) continue;
-					
-					d = _cell_dist(i, row, j, col, plotLength); //distance
-					pd = (d > MAXD) ? (0.0) : (exp(-sd_Rate*d)); //dispersal probability
-					
-					if(!ZRO(pd)) {
-						grid_SD[cell].cells[k] = i + ( (j-1) * grid_Cols) - 1;
-						grid_SD[cell].prob[k] = pd;
-						grid_SD[cell].size++;
-						k++;
-						//fprintf(stderr, "cell: %d; i: %d; j: %d; dist: %f; pd: %f %d %d\n", i + ( (j-1) * grid_Cols) - 1, i, j, d, pd, row, col); 
+		plotLength = sqrt(Globals.plotsize);
+		MAXDP = (int) ceil(MAXD / plotLength); //MAXD in terms of plots... rounds up to the nearest integer
+		maxCells = (int) pow((MAXDP*2) + 1.0, 2.0); //gets the maximum number of cells that a grid cell can possibly disperse seeds to... it ends up being more then the maximum actually...
+		if(grid_Cells < maxCells)
+			maxCells = grid_Cells;
+		if(! (Species[s]->use_me && Species[s]->use_dispersal) ) continue;
+		
+		for(i = 0; i < grid_Cells; i++) {
+			grid_SD[s][i].cells = Mem_Calloc(maxCells, sizeof(int), "_read_seed_dispersal_in()"); //the cell number
+			grid_SD[s][i].prob = Mem_Calloc(maxCells, sizeof(float), "_read_seed_dispersal_in()"); //the probability that the cell will disperse seeds to this distance
+			grid_SD[s][i].size = 0; //refers to the number of cells reachable...
+		}
+
+		for(row = 1; row <= grid_Rows; row++)
+			for(col = 1; col <= grid_Cols; col++) {
+
+				cell = col + ( (row-1) * grid_Cols) - 1;
+				k = 0;
+
+				for(i = 1; i <= grid_Rows; i++)
+					for(j = 1; j <= grid_Cols; j++) {
+						if(i == row && j == col) continue;
+
+						d = _cell_dist(i, row, j, col, plotLength); //distance
+						pd = (d > MAXD) ? (0.0) : (exp(-sd_Rate*d)); //dispersal probability
+
+						if(!ZRO(pd)) {
+							grid_SD[s][cell].cells[k] = i + ( (j-1) * grid_Cols) - 1;
+							grid_SD[s][cell].prob[k] = pd;
+							grid_SD[s][cell].size++;
+							k++;
+							//fprintf(stderr, "cell: %d; i: %d; j: %d; dist: %f; pd: %f %d %d\n", i + ( (j-1) * grid_Cols) - 1, i, j, d, pd, row, col); 
+						}
 					}
-				}
-			//fprintf(stderr, "size %d index %d maxsize %d\n", grid_SD[cell].size, cell, maxCells);
-		}
-		
-	for(i = 0; i < grid_Cells; i++)
-		if(grid_SD[i].size > 0) {
-			grid_SD[i].cells = Mem_ReAlloc(grid_SD[i].cells, grid_SD[i].size * sizeof(int));
-			grid_SD[i].prob = Mem_ReAlloc(grid_SD[i].prob, grid_SD[i].size * sizeof(float));
-		}
+				//fprintf(stderr, "size %d index %d maxsize %d\n", grid_SD[cell].size, cell, maxCells);
+			}
+
+		for(i = 0; i < grid_Cells; i++)
+			if(grid_SD[s][i].size > 0) {
+				grid_SD[s][i].cells = Mem_ReAlloc(grid_SD[s][i].cells, grid_SD[s][i].size * sizeof(int));
+				grid_SD[s][i].prob = Mem_ReAlloc(grid_SD[s][i].prob, grid_SD[s][i].size * sizeof(float));
+			}
+	}
 }
 
 /***********************************************************/
-static void _do_seed_dispersal() {
-	float biomass=0, randomN, LYPPT, presentProb, receivedProb;
-	int i, j;
-	
-	randomN = RandUni();
-	if(!LE(randomN, sd_Estab_Prob)) { //don't bother doing all the seed dispersal if the seeds can't germinate/establish this year...
-		for( i = 0; i < grid_Cells; i++)
-			grid_SD[i].seeds_present = grid_SD[i].seeds_received = 0;
+static void _do_seed_dispersal(void ) {
+	float biomass, randomN, LYPPT, presentProb, receivedProb;
+	int i, j, germ, sgerm, year;
+	SppIndex s;
+
+	if(Globals.currYear == 1) { //since we have no previous data to go off of, use the current years...
+		for(i = 0; i < grid_Cells; i++) 
+			ForEachSpecies(s) {
+				if( ! (Species[s]->use_me && Species[s]->use_dispersal) ) continue;	
+				grid_Species[s][i].allow_growth = 1;	// since it's the first year, we have to allow growth...
+				if(UseDisturbances)
+					if(1 == grid_Disturb[i].kill_yr)
+						grid_Species[s][i].allow_growth = 0;
+				grid_SD[s][i].lyppt = grid_Env[i].ppt;
+			}
+	} else {
+		// figure out whether or not to allow growth for the current year... based upon whether the species already has plants or germination allowed this year and seeds received last year...
+		ForEachSpecies(s) {
 			
-		return;
-	}
-	
-	if(Globals.currYear == 1) //use the first years ppt, since we have no previous data to go on...
-		for(i = 0; i < grid_Cells; i++)
-			grid_SD[i].lyppt = grid_Env[i].ppt;
-	
-	// figure out which cells produced seeds...
-	for(i = 0; i < grid_Cells; i++) {
-		grid_SD[i].seeds_present = grid_SD[i].seeds_received = 0;
-		biomass = _get_grid_biomass(i);
-		
-		if(GE(biomass, sd_Biomass_Req)) {
-			randomN = RandUni();
-			LYPPT = grid_SD[i].lyppt;
-			presentProb = 1.0 - 0.99*exp( sd_Ps_Const1*(LYPPT-sd_Ps_Const2));
-			if(LE(randomN, presentProb))
-				grid_SD[i].seeds_present = 1;
+			if(! (Species[s]->use_me && Species[s]->use_dispersal) ) continue;
+			
+			// germination probability
+			randomN = RandUni(); 
+			germ = LE(randomN, Species[s]->seedling_estab_prob);
+
+			year = Globals.currYear - 1;
+			
+			for(i = 0; i < grid_Cells; i++) {
+				sgerm = (grid_SD[s][i].seeds_present || grid_SD[s][i].seeds_received) && germ; //refers to whether the species has seeds available from the previous year and conditions are correct for germination this year
+				grid_Species[s][i].allow_growth = FALSE;
+				biomass = grid_Species[s][i].relsize * grid_Species[s][i].mature_biomass;
+
+				if(UseDisturbances) {
+					if((sgerm ||  year < grid_Disturb[i].kill_yr || grid_Disturb[i].kill_yr <= 0 ||  GT(biomass, 0.0)) && (year != grid_Disturb[i].kill_yr))
+						grid_Species[s][i].allow_growth = TRUE;
+				} else if(sgerm || GT(biomass, 0.0))
+					grid_Species[s][i].allow_growth = TRUE;
+				//if(grid_Species[s][i].allow_growth == TRUE &&  i == 52 && s == 0 && Globals.currIter == 1)
+				//	printf("%s allow_growth:%d year:%d sgerm:%d iter:%d\n", grid_Species[s][i].name, grid_Species[s][i].allow_growth, year, sgerm, Globals.currIter);
+			}
 		}
-		//if(i == 0) printf("cell: %d lyppt: %f\n", i, grid_SD[i].lyppt);
+
 	}
-	
-	// figure out which cells received seeds... (only refers to cells which haven't produced seeds already)
-	for(i = 0; i < grid_Cells; i++) {
-		if(grid_SD[i].seeds_present) continue;
-		receivedProb = 0;
-		
-		for(j = 0; j < grid_SD[i].size; j++)
-			if(grid_SD[grid_SD[i].cells[j]].seeds_present)
-				receivedProb += grid_SD[i].prob[j];
-				
-		randomN = RandUni();
-		if(LE(randomN, receivedProb) && !ZRO(receivedProb)) 
-			grid_SD[i].seeds_received = 1;
-		else
-			grid_SD[i].seeds_received = 0;
+
+	// calculate whether or not seeds were received/produced this year, this data is used the next time the function is called
+	ForEachSpecies(s) {
+		if(! (Species[s]->use_me && Species[s]->use_dispersal) ) continue;
+
+		IndivType* indiv;
+
+		// figure out which species in each cell produced seeds...
+		for(i = 0; i < grid_Cells; i++) {
+			grid_SD[s][i].seeds_present = grid_SD[s][i].seeds_received = grid_Species[s][i].received_prob = 0;
+			
+			biomass = 0;	//getting the biggest individual in the species...
+			ForEachIndiv(indiv, &grid_Species[s][i])
+				if(indiv->relsize * grid_Species[s][i].mature_biomass > biomass)
+					biomass = indiv->relsize * grid_Species[s][i].mature_biomass;  
+
+			if(GE(biomass, grid_Species[s][i].mature_biomass * grid_Species[s][i].sd_Param1)) {
+				randomN = RandUni();
+
+				LYPPT = grid_SD[s][i].lyppt;
+				float PPTdry = grid_Species[s][i].sd_PPTdry, PPTwet = grid_Species[s][i].sd_PPTwet;
+				float Pmin = grid_Species[s][i].sd_Pmin, Pmax = grid_Species[s][i].sd_Pmax;
+
+				//p3 = Pmin, if LYPPT < PPTdry 
+				//p3 = 1 - (1-Pmin) * exp(-d * (LYPPT - PPTdry)) with d = - ln((1 - Pmax)/(1 - Pmin)) / (PPTwet - PPTdry), if PPTdry <= LYPPT <= PPTwet
+				//p3 = Pmax, if LYPPT > PPTwet
+			
+				presentProb = 0.0;
+				if(PPTdry <= LYPPT && LYPPT <= PPTwet) {
+					float d = -log(((1 - Pmax)/(1 - Pmin))) / (PPTwet - PPTdry); //log is the natural log in STD c's math.h
+					presentProb = 1 - (1-Pmin) * exp((-d * (LYPPT - PPTdry)));
+				} else if(LYPPT < PPTdry)
+					presentProb = Pmin;
+				else if(LYPPT > PPTwet)
+					presentProb = Pmax;
+
+				if(LE(randomN, presentProb))
+					grid_SD[s][i].seeds_present = 1;
+			}
+			//if(i == 0) printf("cell: %d lyppt: %f\n", i, grid_SD[i].lyppt);
+		}
+
+		// figure out which species in each cell received seeds...
+		for(i = 0; i < grid_Cells; i++) {
+			if(grid_SD[s][i].seeds_present) continue;
+			receivedProb = 0;
+			
+			for(j = 0; j < grid_SD[s][i].size; j++)
+				if(grid_SD[s][grid_SD[s][i].cells[j]].seeds_present)
+					receivedProb += grid_SD[s][i].prob[j];
+
+			randomN = RandUni();
+			if(LE(randomN, receivedProb) && !ZRO(receivedProb)) 
+				grid_SD[s][i].seeds_received = 1;
+			else
+				grid_SD[s][i].seeds_received = 0;
+
+			grid_Species[s][i].received_prob = receivedProb;
+		}
 	}
 } 
 
 /***********************************************************/
 static void _set_sd_lyppt(int row, int col) {
 	int cell = col + ( (row-1) * grid_Cols) - 1;
+	SppIndex s;
 	
-	grid_SD[cell].lyppt = grid_Env[cell].ppt;
-}
-
-/***********************************************************/
-static float _get_grid_biomass(int cell) {
-	// gets the biomass for the entirety of the grid cell...
-	float result = 0;
-	SppIndex sp;
-	
-	ForEachSpecies(sp)
-  		result += grid_Species[sp][cell].relsize * grid_Species[sp][cell].mature_biomass;
-  			
-	return result;
+	ForEachSpecies(s)
+		if(Species[s]->use_me && Species[s]->use_dispersal) 
+			grid_SD[s][cell].lyppt = grid_Env[cell].ppt;
 }
 
 /***********************************************************/
@@ -1414,10 +1456,29 @@ static void _kill_groups_and_species( void ) {
 	SppIndex sp;
 	
 	ForEachGroup(c)
-		RGroup[c]->pr = 0.0; // reset the pr, so our output doesn't look weird...
+		RGroup[c]->pr = 0.0; // reset the pr, so our output doesn't look weird
 									
 	ForEachSpecies(sp) {
 		if(!Species[sp]->use_me) continue;
 		Species_Kill(sp);
+		Species[sp]->relsize = 0.0;
 	}
+}
+
+/***********************************************************/
+static int _do_grid_disturbances( int row, int col ) {
+	// return 1 if a disturbance occurs, else return 0
+	if(UseDisturbances) {
+		int cell = col + ( (row-1) * grid_Cols) - 1;
+		if(Globals.currYear == grid_Disturb[cell].kill_yr) {
+			//basically if a disturbance occurs, we kill everything and then don't allow any species to grow for the year
+			_kill_groups_and_species();
+			SppIndex s;
+			ForEachSpecies(s)
+				if(Species[s]->use_me && Species[s]->use_dispersal)
+					Species[s]->allow_growth = FALSE;
+			return 1;
+		}
+	}
+	return 0;
 }

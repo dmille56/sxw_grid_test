@@ -59,8 +59,9 @@ IntS Species_NumEstablish( SppIndex sp) {
 /* Chris Bennett @ LTER-CSU 6/15/2000            */
 
 /*------------------------------------------------------*/
+  float biomass = Species[sp]->relsize * Species[sp]->mature_biomass;
   if ( RGroup[Species[sp]->res_grp]->est_annually ||
-       LE( RandUni(), Species[sp]->seedling_estab_prob) ) {
+       LE( RandUni(), Species[sp]->seedling_estab_prob) || (Species[sp]->allow_growth && Species[sp]->use_dispersal && !GT(biomass, 0.0))) {
     if (Species[sp]->max_seed_estab <= 1)
       return 1;
     else
@@ -268,7 +269,7 @@ void Species_Update_Newsize( SppIndex sp, RealF newsize ) {
 
 #undef xF_DELTA
 #undef xD_DELTA
-#undef ZERO(x)
+#undef ZERO
 }
 
 

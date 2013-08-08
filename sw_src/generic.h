@@ -182,7 +182,7 @@ extern int logged;  /* REQUIRED */
 // an alternate definition of pow(x, y)... this is faster then the one in math.h, but comes with a cost as the precision is slightly lower.  The measured precision drop I was getting was at max a relative error of about 100 billion percent (12 places after the decimal point) per calculation though so I don't think it's a big deal... (though it's hard to even accurately tell)
 // generally undefining standard library functions is BAD, so take this out later...
 #define pow2(x, y) (exp((y) * log(x))) //x^y == exponential(y * ln(x)) or e^(y * ln(x)).  NOTE: this will only work when x > 0 I believe
-#undef pow(x, y)
+#undef pow
 #define pow(x, y) pow2(x, y)
 
 /***************************************************

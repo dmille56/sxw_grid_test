@@ -26,7 +26,7 @@ libDirs	=	-Lsw_src
 incDirs	=	-Isw_src
 
 LIBS	=	
-C_FLAGS	=	-g -02 -m32 -Wstrict-prototypes -Wmissing-prototypes -Wimplicit -Wunused -Wformat -Wredundant-decls -Wcast-align\
+C_FLAGS	=	-g -m32 -O2 -Wstrict-prototypes -Wmissing-prototypes -Wimplicit -Wunused -Wformat -Wredundant-decls -Wcast-align\
 	-DSTEPWAT
 
 SRCS	=\
@@ -129,7 +129,7 @@ cleanall:	cleanobjs cleanbin
 #@# Dependency rules follow -----------------------------
 
 $(Bin)/stepwat: $(EXOBJS)
-	$(CC) -g -02 -m32 -o $(Bin)/stepwat $(EXOBJS) $(incDirs) $(libDirs) $(LIBS)
+	$(CC) -g -m32 -O2 -o $(Bin)/stepwat $(EXOBJS) $(incDirs) $(libDirs) $(LIBS)
 	
 $(oDir)/sw_src/filefuncs.o: sw_src/filefuncs.c sw_src/filefuncs.h \
  sw_src/generic.h

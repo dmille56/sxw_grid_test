@@ -122,6 +122,7 @@ MortFlagsType  MortFlags;
 
 Bool UseSoilwat; /* not used in every module */
 Bool UseGrid;
+Bool UseSeedDispersal;
 Bool EchoInits;
 Bool UseProgressBar;
 
@@ -333,7 +334,7 @@ static void init_args(int argc, char **argv) {
 
   /* Defaults */
   parm_SetFirstName( DFLT_FIRSTFILE);
-  UseSoilwat = QuietMode = EchoInits = FALSE;
+  UseSoilwat = QuietMode = EchoInits = UseSeedDispersal = FALSE;
   SXW.debugfile = NULL;
   progfp = stderr;
 

@@ -1060,9 +1060,10 @@ static void _species_init( void) {
        vegi,
        temp,
        turnon,
+       turnondispersal,
        viable;
    RealF irate, ratep, estab, minb, maxb, cohort, xdecay,
-         p1, p2, p3, p4;
+         p1, p2, p3, p4, p5, p6, p7;
 
    char clonal[5];
 
@@ -1076,7 +1077,7 @@ static void _species_init( void) {
          continue;
       }
 
-      x=sscanf( inbuf, "%s %hd %hd %f %f %hd %hd %f %hd %f %f %s %hd %hd %f %hd",
+      x=sscanf( inbuf, "%s %hd %hd %f %f %hd %hd %f %hd %f %f %s %hd %hd %f %hd %hd",
                 name,
                 &rg, &age, &irate, &ratep, &slow, &dist,
                 &estab, &eind, &minb, &maxb, clonal,
@@ -1123,6 +1124,7 @@ static void _species_init( void) {
                                 ? vegi
                                 : 0;
       Species[sp]->use_me = (RGroup[rg-1]->use_me) ? itob(turnon) : FALSE ;
+      Species[sp]->received_prob = 0;
       Species[sp]->cohort_surv = cohort;
 /*      Species[sp]->ann_mort_prob = (age > 0)
                                  ? -log(cohort)/age
@@ -1208,7 +1210,40 @@ static void _species_init( void) {
       LogError(logfp, LOGFATAL, "%s: Incorrect/incomplete input in probs",
               MyFileName);
    }
-   
+
+   /* ------------------------------------------------- */
+   /* ------- read the seed dispersal parameters ------ */
+   sppok = readspp = TRUE;
+   while( readspp ) {
+	if( !GetALine(f, inbuf) ) {sppok=FALSE; break;}
+	if( !isnull(strstr(inbuf,"[end]")) ) {
+		readspp=FALSE;
+		continue;
+	}
+
+	x = sscanf( inbuf, "%s %hd %f %f %f %f %f %f %f", 
+		    name, &turnondispersal, &p1, &p2, &p3, &p4, &p5, &p6, &p7);
+	if(x < 9)
+		LogError(logfp, LOGFATAL, "%s: Too few columns in species seed dispersal inputs", MyFileName);
+
+	_setNameLen(name2, name, MAX_SPECIESNAMELEN);
+	sp = Species_Name2Index(name2);
+	if( sp < 0)
+		LogError(logfp, LOGFATAL, "%s: Mismatched name (%s) for species seed dispersal inputs", MyFileName, name2);
+		
+        Species[sp]->use_dispersal = itob(turnondispersal);
+        Species[sp]->allow_growth = TRUE;
+	
+	Species[sp]->sd_Param1 = p1;
+	Species[sp]->sd_PPTdry = p2;
+	Species[sp]->sd_PPTwet = p3;
+	Species[sp]->sd_Pmin = p4;
+	Species[sp]->sd_Pmax = p5;
+	Species[sp]->sd_H = p6;
+	Species[sp]->sd_VT = p7;
+   }
+   if(!sppok) 
+	  LogError(logfp, LOGFATAL, "%s: Incorrect/incomplete input in species seed dispersal input", MyFileName);
 
    CloseFile(&f);
 }

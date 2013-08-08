@@ -90,8 +90,10 @@ struct species_st {
         estabs;        /* number of individuals established in iter */
   RealF relsize,       /* size of all indivs' relsize (>= 0) */
         *seedprod,     /* annuals: array of previous years' seed production (size = viable_yrs)*/
-        extragrowth;   /* amt of superfluous growth from extra resources */
+        extragrowth,   /* amt of superfluous growth from extra resources */
+	received_prob;	//the chance that this species received seeds this year... only applicable if using seed dispersal and gridded option
   struct indiv_st *IndvHead;    /* facility for linked list 8/3/01; top of list */
+  Bool allow_growth; //whether to allow growth this year... only applicable if using seed dispersal and gridded option
 
   /**** Quantities that DO NOT change during model runs *****/
 
@@ -114,12 +116,20 @@ struct species_st {
         ann_mort_prob,
         cohort_surv,
         exp_decay,        /* annuals: exponent for viability decay function */
-        prob_veggrow[4]; /* 1 value for each mortality type, if clonal*/
+        prob_veggrow[4],  /* 1 value for each mortality type, if clonal*/
+  	sd_Param1,	  /* for seed dispersal */
+  	sd_PPTdry,
+	sd_PPTwet,
+	sd_Pmin,
+	sd_Pmax,
+	sd_H,
+	sd_VT;
   TempClass tempclass;
   DisturbClass disturbclass;
   Bool isclonal,
        use_temp_response,
-       use_me;           /* do not establish if this is false */
+       use_me,           /* do not establish if this is false */
+       use_dispersal;	//whether to use seed dispersal... only applicable if using gridded option
 };
 
 struct resourcegroup_st {

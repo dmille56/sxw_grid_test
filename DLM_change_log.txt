@@ -63,15 +63,19 @@ ST_params.c:
 	-added parm_SetName() function to facilitate changing filenames easily
 	-Found a bug... so for species that were defined to not have a max_age (ie they should never die because of age), there we errors being logged about them dieing because they had grown larger then the maximum_age.  However this should never happen based upon definition.  To remedy this bug what I have done is in ST_params.c in the _check_species() function I have changed the "if (s->max_age == 0) s->max_age = runyrs;" line to read "if (s->max_age == 0) s->max_age = runyrs+1;"
 	-added parm_free_memory() function to free memory allocated in the module
-	
+	-added lines to _species_init() function to initialize new values added to species_st.
+
 ST_stats.c:
 	-added accumulators_grid_st struct
 	-added module level variable accumulators (grid_Stat) for the grid (to hold the accumulators for every cell) and functions to deal with them (stat_Load_Accumulators(), stat_Save_Accumulators() stat_Free_Accumulators(), and stat_Init_Accumulators()).  These functions are called from ST_grid.c and manage the output accumulators so that the gridded version can output correctly.  The accumulators are dynamically allocated, so be careful with them.	
 	-these accumulators were added so that I wouldn't have to make the already used ones global variables...
-	-all together this added quite a bit of code (230 lines or so)... this has been the source file that I've added the most to by far.	
+	-all together this added quite a bit of code (230 lines or so)... this has been the source file that I've added the most to by far.
+	-added a new accumulator for the seed dispersal output called _Sreceived...	
+	-added a new function stat_Output_Seed_Dispersal()
 	
 ST_species.c:
 	-added code to species_Update_Kills() function to check that the species's age isn't larger then the max age before writing to the kills pointer as it was writing off the edge of the pointer in some obscure cases...
+	-added code to Species_NumEstablish() function to allow species to establish if the seeds are received in a germination year in seed dispersal...  
 
 makefile:
 	-updated to account for the new ST_grid.c source file.
@@ -96,3 +100,12 @@ sxw.c:
 
 generic.h:
 	-replaced macros (isless2(), iszero(), ismore(), & isequal()) with new faster macros... these new ones run a LOT faster and consequently sped up the program by about 4x or so.
+
+ST_resgroups.c:
+	-rewrote Rgroup_GetIndivs() function so that it no longer needs to call Mem_Realloc(), since it was giving an error sometimes when trying to reallocate memory.
+	-added a line to check if we're allowing growth for seed_dispersal in rgroup_Establish() function...
+	-added a line to check if we're allowing growth for seed_dispersal in rgroup_Grow() function...
+
+ST_structs.h:
+	-added use_dispersal and allow_growth Bool variables to species_st for use in seed dispersal.  
+	-also added received_prob variable for use in seed dispersal as well as parameters for seed dispersal (sd_PPTdry, sd_PPTwet, sd_PPTmin, sd_PPTmax, sd_H, sd_VT)

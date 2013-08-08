@@ -325,7 +325,7 @@ HISTORY:
 	05/29/2012 (DLM) initial coding
 **************************************************************************************************************************************/
 double lobfB( double xs[], double ys[], unsigned int n) {
-	double sumX, sumY, xMean, yMean, temp;;
+	double sumX, sumY, temp;
 	unsigned int i;
 	
 	sumX = sumY = 0.0;
@@ -335,8 +335,6 @@ double lobfB( double xs[], double ys[], unsigned int n) {
 	}
 	
 	temp = n + 0.0;
-	xMean = sumX / temp;
-	yMean = sumY / temp;
 	return ( (sumY - lobfM(xs, ys, n) * sumX) / temp);
 } 
 
